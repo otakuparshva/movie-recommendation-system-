@@ -1,4 +1,3 @@
-uvicorn
 pandas
 sklearn
 streamlit
