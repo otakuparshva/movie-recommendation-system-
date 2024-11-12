@@ -5,7 +5,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 
 st.set_page_config(
-    page_title="CinePick",
+    page_title="MoviePick",
     page_icon="🎬",
 )
 
@@ -48,7 +48,7 @@ def main():
     else:
         st.markdown("<style>.stApp {color: black; background-color: white;}</style>", unsafe_allow_html=True)
 
-    st.title("CinePick - Randomized Movie Recommendation")
+    st.title("MoviePick - Randomized Movie Recommendation")
     st.subheader("Choose genres to customize your recommendations with added randomness.")
 
     inc_input = st.multiselect('Include Genres', options=sorted(vect.get_feature_names_out()), key='inc_genres')
