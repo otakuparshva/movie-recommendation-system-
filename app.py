@@ -9,91 +9,57 @@ st.set_page_config(
     page_icon="🎬",
 )
 
-# Function to load movie data and initialize variables
-def load_data():
-    movies_df = pd.read_csv('movies.csv')
-    vectorizer = CountVectorizer(tokenizer=lambda x: x.split(','))
-    genres_matrix = vectorizer.fit_transform(movies_df['genres'])
-    cosine_sim = cosine_similarity(genres_matrix, genres_matrix)
-    return movies_df, vectorizer, genres_matrix, cosine_sim
+def load():
+    df = pd.read_csv('movies.csv')
+    vect = CountVectorizer(tokenizer=lambda x: x.split(','))
+    matrix = vect.fit_transform(df['genres'])
+    sim = cosine_similarity(matrix, matrix)
+    return df, vect, matrix, sim
 
-# Function to recommend movies based on genres
-def recommend_movies_by_genres(movies_df, vectorizer, genres_matrix, cosine_sim, exclude_genres=[], include_genres=[], n=1):
-    # Vector representing include genres
-    genres_vector = vectorizer.transform(include_genres)
-    # Similarity scores
-    sim_scores = cosine_similarity(genres_vector, genres_matrix).flatten()
-    # Exclude specified genres (filter movie indices)
-    exclude_indices = [i for i, genre in enumerate(movies_df['genres']) if any(exclude_genre in genre for exclude_genre in exclude_genres)]
-    valid_indices = [i for i in range(len(sim_scores)) if i not in exclude_indices]
-    if valid_indices:
-        # Get movie indices based on similarity scores
-        movie_indices = sorted(valid_indices, key=lambda x: sim_scores[x], reverse=True)[:n]
-        return movies_df.iloc[movie_indices][['title', 'genres']]
+def get_recs(df, vect, matrix, sim, inc=[], exc=[], n=3):
+    if inc:
+        inc_vec = vect.transform(inc)
+        inc_scores = cosine_similarity(inc_vec, matrix).flatten()
     else:
-        return movies_df.sample(n=n)[['title', 'genres']]
-
-# Function to render dark mode
-def render_dark_mode():
-    st.markdown(
-        """
-        <style>
-        .stApp {
-            color: white;
-            background-color: #1E1E1E;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
-
-# Function to render light mode
-def render_light_mode():
-    st.markdown(
-        """
-        <style>
-        .stApp {
-            color: black;
-            background-color: white;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
-
-# Main function to render the app
-def main():
-    # Load data
-    movies_df, vectorizer, genres_matrix, cosine_sim = load_data()
-
-    # Render dark mode or light mode based on user selection
-    mode = st.sidebar.radio("Mode", ("Light", "Dark"))
-
-    if mode == "Dark":
-        render_dark_mode()
-    else:
-        render_light_mode()
-
-    # Main app layout
-    st.title('Movie Recommendation System')
-    st.subheader('Customize Your Recommendations')
-    st.write('Select genres to include or exclude in your movie recommendations.')
+        inc_scores = [0] * len(df)
     
-    # Genre selection
-    include_genres_input = st.multiselect('Include Genres', options=sorted(vectorizer.vocabulary_.keys()), key='include_genres')
-    exclude_genres_input = st.multiselect('Exclude Genres', options=sorted(vectorizer.vocabulary_.keys()), key='exclude_genres')
+    all_genres = vect.get_feature_names_out()
+    def_genres = list(set(all_genres) - set(inc) - set(exc))
+    if def_genres:
+        def_vec = vect.transform(def_genres)
+        def_scores = cosine_similarity(def_vec, matrix).mean(axis=0)
+    else:
+        def_scores = [0] * len(df)
+    
+    exc_idx = [i for i, genre in enumerate(df['genres']) if any(exc_genre in genre for exc_genre in exc)]
+    scores = 0.7 * inc_scores + 0.3 * def_scores
+    scores[exc_idx] = -1
 
-    # Number of recommendations selection
-    num_recommendations = st.selectbox('How many movie recommendations do you want?', [1, 2, 3, 4, 5])
+    top_idx = sorted(range(len(scores)), key=lambda x: scores[x], reverse=True)[:n]
+    return df.iloc[top_idx][['title', 'genres']]
 
-    # Get recommendation button
-    if st.button('Get Recommendations'):
-        recommendations = recommend_movies_by_genres(movies_df, vectorizer, genres_matrix, cosine_sim, include_genres=include_genres_input, exclude_genres=exclude_genres_input, n=num_recommendations)
-        st.subheader('Top Recommendations')
-        for index, row in recommendations.iterrows():
+def main():
+    df, vect, matrix, sim = load()
+
+    mode = st.sidebar.radio("Mode", ("Light", "Dark"))
+    if mode == "Dark":
+        st.markdown("<style>.stApp {color: white; background-color: #1E1E1E;}</style>", unsafe_allow_html=True)
+    else:
+        st.markdown("<style>.stApp {color: black; background-color: white;}</style>", unsafe_allow_html=True)
+
+    st.title("CinePick - Enhanced Movie Recommendation")
+    st.subheader("Choose genres to customize your recommendations and see movies based on genre priority.")
+
+    inc_input = st.multiselect('Include Genres', options=sorted(vect.get_feature_names_out()), key='inc_genres')
+    exc_input = st.multiselect('Exclude Genres', options=sorted(vect.get_feature_names_out()), key='exc_genres')
+
+    if st.button("Get Recommendations"):
+        recs = get_recs(df, vect, matrix, sim, inc=inc_input, exc=exc_input, n=3)
+
+        st.subheader("Top Recommendations")
+        for index, row in recs.iterrows():
             st.write(f"**{row['title']}**")
-            st.write(f"*Genres*: {row['genres']}\n")
+            st.write(f"*Genres*: {row['genres']}")
 
-# Run the app
 if __name__ == "__main__":
     main()
