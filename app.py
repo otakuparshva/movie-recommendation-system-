@@ -1,66 +1,67 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import numpy as np
 
-st.set_page_config(
-    page_title="MoviePick",
-    page_icon="🎬",
-)
+st.set_page_config(page_title="MoviePick", page_icon="🎬", layout="centered")
 
-def load():
+@st.cache_data(show_spinner=False)
+def load_data():
     df = pd.read_csv('movies.csv')
-    vect = CountVectorizer(tokenizer=lambda x: x.split(','))
-    matrix = vect.fit_transform(df['genres'])
-    sim = cosine_similarity(matrix, matrix)
-    return df, vect, matrix, sim
+    df['genres'] = df['genres'].fillna('')
+    vectorizer = CountVectorizer(tokenizer=lambda x: x.split(','), lowercase=False)
+    matrix = vectorizer.fit_transform(df['genres'])
+    similarity = cosine_similarity(matrix)
+    return df, vectorizer, matrix, similarity
 
-def get_recs(df, vect, matrix, sim, inc=[], exc=[], n=3):
-    if inc:
-        inc_vec = vect.transform(inc)
-        inc_scores = cosine_similarity(inc_vec, matrix).max(axis=0)
-    else:
-        inc_scores = np.zeros(len(df))
-
-    all_genres = vect.get_feature_names_out()
-    def_genres = list(set(all_genres) - set(inc) - set(exc))
-    if def_genres:
-        def_vec = vect.transform(def_genres)
-        def_scores = cosine_similarity(def_vec, matrix).mean(axis=0)
-    else:
-        def_scores = np.zeros(len(df))
-
-    exc_idx = [i for i, genre in enumerate(df['genres']) if any(ex in genre for ex in exc)]
-    scores = 0.7 * inc_scores + 0.3 * def_scores
-    scores = [score if idx not in exc_idx else -1 for idx, score in enumerate(scores)]
-
-    top_idx = sorted(range(len(scores)), key=lambda x: scores[x], reverse=True)[:n*2]
-    random_indices = np.random.choice(top_idx, n, replace=False)
-    return df.iloc[random_indices][['title', 'genres']]
+def recommend(df, vectorizer, matrix, similarity, include=None, exclude=None, n=3):
+    include = include or []
+    exclude = exclude or []
+    include_vec = vectorizer.transform(include) if include else np.zeros((1, matrix.shape[1]))
+    include_score = cosine_similarity(include_vec, matrix).max(axis=0) if include else np.zeros(len(df))
+    all_genres = set(vectorizer.get_feature_names_out())
+    default_genres = list(all_genres - set(include) - set(exclude))
+    default_vec = vectorizer.transform(default_genres) if default_genres else np.zeros((1, matrix.shape[1]))
+    default_score = cosine_similarity(default_vec, matrix).mean(axis=0) if default_genres else np.zeros(len(df))
+    exclude_idx = df.index[df['genres'].apply(lambda g: any(e in g for e in exclude))].tolist()
+    final_score = 0.7 * include_score + 0.3 * default_score
+    final_score[exclude_idx] = -1
+    top_idx = np.argsort(final_score)[::-1][:n * 3]
+    selected = np.random.choice(top_idx, size=min(n, len(top_idx)), replace=False)
+    return df.iloc[selected][['title', 'genres']]
 
 def main():
-    df, vect, matrix, sim = load()
+    df, vectorizer, matrix, similarity = load_data()
+    st.markdown(
+        """
+        <style>
+        .main-title {text-align:center;font-size:36px;font-weight:700;margin-top:10px;}
+        .subtitle {text-align:center;font-size:18px;margin-bottom:20px;color:gray;}
+        </style>
+        """, unsafe_allow_html=True
+    )
+    st.markdown("<div class='main-title'>🎬 MoviePick</div>", unsafe_allow_html=True)
+    st.markdown("<div class='subtitle'>AI-Powered Movie Recommendation with a Dash of Randomness</div>", unsafe_allow_html=True)
 
-    mode = st.sidebar.radio("Mode", ("Light", "Dark"))
-    if mode == "Dark":
-        st.markdown("<style>.stApp {color: white; background-color: #1E1E1E;}</style>", unsafe_allow_html=True)
+    theme = st.sidebar.selectbox("Theme", ["Light", "Dark"])
+    if theme == "Dark":
+        st.markdown("<style>.stApp{background-color:#121212;color:#FFFFFF;}</style>", unsafe_allow_html=True)
     else:
-        st.markdown("<style>.stApp {color: black; background-color: white;}</style>", unsafe_allow_html=True)
+        st.markdown("<style>.stApp{background-color:#FFFFFF;color:#000000;}</style>", unsafe_allow_html=True)
 
-    st.title("MoviePick - Randomized Movie Recommendation")
-    st.subheader("Choose genres to customize your recommendations with added randomness.")
+    include_genres = st.multiselect('Include Genres', sorted(vectorizer.get_feature_names_out()))
+    exclude_genres = st.multiselect('Exclude Genres', sorted(vectorizer.get_feature_names_out()))
 
-    inc_input = st.multiselect('Include Genres', options=sorted(vect.get_feature_names_out()), key='inc_genres')
-    exc_input = st.multiselect('Exclude Genres', options=sorted(vect.get_feature_names_out()), key='exc_genres')
-
-    if st.button("Get Recommendations"):
-        recs = get_recs(df, vect, matrix, sim, inc=inc_input, exc=exc_input, n=3)
-
-        st.subheader("Top Recommendations")
-        for index, row in recs.iterrows():
-            st.write(f"**{row['title']}**")
-            st.write(f"*Genres*: {row['genres']}")
+    if st.button("Get Recommendations 🎥"):
+        recs = recommend(df, vectorizer, matrix, similarity, include=include_genres, exclude=exclude_genres, n=3)
+        if recs.empty:
+            st.warning("No matching recommendations found. Try adjusting your filters.")
+        else:
+            st.subheader("🎯 Top Picks For You")
+            for _, row in recs.iterrows():
+                st.markdown(f"**🎞️ {row['title']}**")
+                st.markdown(f"<span style='color:gray'>Genres: {row['genres']}</span>", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
